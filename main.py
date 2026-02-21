@@ -24,8 +24,9 @@ from bs4 import BeautifulSoup
 # CONFIG - credentials loaded from environment variables
 # Set these in Railway's "Variables" tab, not here!
 # ============================================================
-webhook = os.environ.get("DISCORD_WEBHOOK_URL")
-api        = os.environ.get("GROQ_API_KEY")
+
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+GROQ_API_KEY        = os.environ.get("GROQ_API_KEY")
 RSS_FEED_URL        = "https://coastal-anarchy.boards.net/rss/public"
 
 # How often to check for new posts (in seconds)
