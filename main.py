@@ -74,30 +74,35 @@ def scrape_thread(url: str) -> list[dict]:
     soup = BeautifulSoup(response.text, "html.parser")
     posts = []
 
-    for row in soup.find_all("td", class_="message_inner"):
-        content_div = row.find("div", class_="post_body")
-        if not content_div:
-            content = row.get_text(separator=" ", strip=True)
-        else:
-            content = content_div.get_text(separator=" ", strip=True)
+    # ProBoards puts posts inside <td> cells that contain "Post by USERNAME"
+    # We look for any td that contains a "Post by" marker
+    for td in soup.find_all("td"):
+        text = td.get_text(separator=" ", strip=True)
 
-        parent_row = row.find_parent("tr")
+        # Skip tiny cells (nav, buttons, etc.)
+        if len(text) < 20:
+            continue
+
+        # ProBoards post cells contain "Post by username on date"
+        if "Post by" not in text:
+            continue
+
+        # Try to extract the author from the "Post by X on date" pattern
         author = "Unknown"
-        if parent_row:
-            author_cell = parent_row.find("td", class_="user_details")
-            if author_cell:
-                author_link = author_cell.find("a")
-                if author_link:
-                    author = author_link.get_text(strip=True)
+        try:
+            after = text.split("Post by")[1]
+            author = after.split("on")[0].strip()
+        except Exception:
+            pass
+
+        # Remove the "Post by X on date" header from the content
+        try:
+            content = text.split("Back to Top")[1].strip() if "Back to Top" in text else text
+        except Exception:
+            content = text
 
         if content:
             posts.append({"author": author, "content": content})
-
-    if not posts:
-        for div in soup.find_all("div", class_="post_body"):
-            content = div.get_text(separator=" ", strip=True)
-            if content:
-                posts.append({"author": "Unknown", "content": content})
 
     return posts
 
