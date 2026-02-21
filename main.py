@@ -44,10 +44,11 @@ PROFANITY_LIST = [
 ]
 
 # ============================================================
-# TRACKING - keeps track of posts we've already seen
+# TRACKING - keeps track of individual posts we've already seen
+# Key: (thread_url, author, content_snippet)
 # ============================================================
 
-seen_post_ids = set()
+seen_posts = set()
 
 
 def contains_profanity(text: str) -> bool:
@@ -74,20 +75,16 @@ def scrape_thread(url: str) -> list[dict]:
     soup = BeautifulSoup(response.text, "html.parser")
     posts = []
 
-    # ProBoards puts posts inside <td> cells that contain "Post by USERNAME"
-    # We look for any td that contains a "Post by" marker
     for td in soup.find_all("td"):
         text = td.get_text(separator=" ", strip=True)
 
-        # Skip tiny cells (nav, buttons, etc.)
         if len(text) < 20:
             continue
 
-        # ProBoards post cells contain "Post by username on date"
         if "Post by" not in text:
             continue
 
-        # Try to extract the author from the "Post by X on date" pattern
+        # Extract author from "Post by X on date"
         author = "Unknown"
         try:
             after = text.split("Post by")[1]
@@ -95,7 +92,7 @@ def scrape_thread(url: str) -> list[dict]:
         except Exception:
             pass
 
-        # Remove the "Post by X on date" header from the content
+        # Extract content after the post header
         try:
             content = text.split("Back to Top")[1].strip() if "Back to Top" in text else text
         except Exception:
@@ -167,7 +164,7 @@ def send_discord_report(post_time: str, author: str,
 
 
 def check_feed():
-    """Fetches the RSS feed and processes any new threads."""
+    """Fetches the RSS feed and scrapes all threads for new posts."""
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking feed...")
 
     try:
@@ -177,33 +174,30 @@ def check_feed():
         return
 
     for entry in feed.entries:
-        post_id   = entry.get("id", entry.get("link", ""))
         link      = entry.get("link", "")
         published = entry.get("published", "Unknown time")
         title     = entry.get("title", "No title")
 
-        if post_id in seen_post_ids:
-            continue
-
-        seen_post_ids.add(post_id)
-        print(f"  📄 New activity in thread: '{title}'")
-
+        # Always scrape every thread to catch new replies
         posts = scrape_thread(link)
-
-        if not posts:
-            print(f"  ⚠️  Could not scrape any posts from thread.")
-            continue
-
-        print(f"  📝 Found {len(posts)} post(s) in thread.")
 
         for post in posts:
             author  = post["author"]
             content = post["content"]
 
+            # Use a fingerprint to uniquely identify this post
+            fingerprint = (link, author, content[:100])
+
+            if fingerprint in seen_posts:
+                continue
+
+            # It's a new post - add to seen
+            seen_posts.add(fingerprint)
+
             if not contains_profanity(content):
                 continue
 
-            print(f"  ⚠️  Profanity detected in post by {author}! Sending to Groq...")
+            print(f"  ⚠️  Profanity detected in post by {author} in '{title}'! Sending to Groq...")
 
             bullying_summary = ask_groq(content, author)
 
@@ -230,15 +224,21 @@ def main():
     print(f"  Checking every {CHECK_INTERVAL} seconds")
     print("  Press Ctrl+C to stop.\n")
 
-    print("Initial scan (loading existing threads to avoid re-flagging)...")
+    # Initial scan - load all existing posts so we don't re-flag old content
+    print("Initial scan (loading existing posts to avoid re-flagging)...")
     try:
         feed = feedparser.parse(RSS_FEED_URL)
+        count = 0
         for entry in feed.entries:
-            post_id = entry.get("id", entry.get("link", ""))
-            seen_post_ids.add(post_id)
-        print(f"  Loaded {len(seen_post_ids)} existing threads. Now monitoring for new ones.\n")
+            link = entry.get("link", "")
+            posts = scrape_thread(link)
+            for post in posts:
+                fingerprint = (link, post["author"], post["content"][:100])
+                seen_posts.add(fingerprint)
+                count += 1
+        print(f"  Loaded {count} existing posts across {len(feed.entries)} threads. Now monitoring for new ones.\n")
     except Exception as e:
-        print(f"  Warning: Could not load existing threads: {e}\n")
+        print(f"  Warning: Could not load existing posts: {e}\n")
 
     while True:
         check_feed()
