@@ -1,1 +1,1 @@
-worker: python forum_monitor.py
+worker: python main.py
